@@ -11,7 +11,8 @@ async function startServer() {
   // API route to read local file or provide fallback
   app.get('/api/victims', async (req, res) => {
     try {
-      const githubUrl = 'https://raw.githubusercontent.com/OussamaSEBROU/TalkAboutMe/main/victims_data.xlsx';
+      // 1. محاولة جلب البيانات من الرابط الخارجي (تأكد من صحة الرابط)
+      const githubUrl = 'https://raw.githubusercontent.com/OussamaSEBROU/Talk-About-Me2/main/src/services/victims_data.xlsx';
       let data: any[] = [];
       
       try {
@@ -26,26 +27,34 @@ async function startServer() {
            throw new Error(`GitHub fetch failed: ${response.status}`);
         }
       } catch (err) {
-        console.error('Failed to fetch from github, falling back to local files...', err);
-        const xlsxPath = path.join(process.cwd(), 'victims_data.xlsx');
-        const csvPath = path.join(process.cwd(), 'victims_data.csv');
+        console.error('Falling back to local files...', err);
         
-        if (fs.existsSync(xlsxPath)) {
-          const workbook = XLSX.readFile(xlsxPath);
-          const sheetName = workbook.SheetNames[0];
-          data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { range: 1 });
-        } else if (fs.existsSync(csvPath)) {
-          // Simple fallback if they upload CSV instead
-          // For full robust parsing PapaParse client-side is often used, but we can send raw
-          const workbook = XLSX.readFile(csvPath);
-          const sheetName = workbook.SheetNames[0];
-          data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { range: 1 });
-        } else {
-          // Send high-quality mock data so the UI can be showcased immediately!
+        // 2. البحث عن الملف في عدة مسارات محتملة لضمان العمل
+        const pathsToTry = [
+          path.join(process.cwd(), 'victims_data.xlsx'),
+          path.join(process.cwd(), 'victims_data.csv'),
+          path.join(process.cwd(), 'src', 'services', 'victims_data.xlsx'),
+          path.join(process.cwd(), 'src', 'services', 'victims_data.csv')
+        ];
+
+        let fileFound = false;
+        for (const filePath of pathsToTry) {
+          if (fs.existsSync(filePath)) {
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { range: 1 });
+            fileFound = true;
+            console.log(`Loaded data from: ${filePath}`);
+            break;
+          }
+        }
+
+        if (!fileFound) {
+          // بيانات تجريبية في حال عدم وجود الملف نهائياً
           data = Array.from({length: 150}).map((_, i) => ({
             Index: String(i+1),
             Name: "Mock Data (Please upload file)",
-            الاسم: "بيانات تجريبية (يرجى رفع الملف يسار الشاشة)",
+            الاسم: "بيانات تجريبية (يرجى رفع الملف)",
             Age: i % 7 === 0 ? "10" : (i % 3 === 0 ? "65" : "25"),
             Born: "2000-01-01",
             Sex: i % 2 === 0 ? "m" : "f",
@@ -54,17 +63,10 @@ async function startServer() {
         }
       }
       
-      // Pre-generate offset lat/lng for mapping
-      // Generates coordinates cleanly constrained strictly within a rectangle covering the Gaza strip 
-      // Rafah (bottom-left) to Beit Hanoun (top-right)
+      // توزيع النقاط عشوائياً داخل حدود قطاع غزة
       data = data.map(p => {
-         // length along the strip
          const t = Math.random();
-         // width across the strip (approx 8km width -> 0.08 deg max variation)
          const w = (Math.random() - 0.5) * 0.08;
-         
-         // Vector from Rafah (31.23, 34.22) to North (31.57, 34.52)
-         // Perpendicular vector for width offset: uLat = -0.66, uLng = 0.75
          return {
            ...p,
            lat: p.lat ?? (31.23 + (t * 0.34) + w * -0.66), 
@@ -74,12 +76,11 @@ async function startServer() {
 
       res.json(data);
     } catch (error) {
-      console.error('Server error fetching data:', error);
+      console.error('Server error:', error);
       res.status(500).json({ error: 'Failed to fetch or parse data' });
     }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -100,4 +101,3 @@ async function startServer() {
 }
 
 startServer();
-
